@@ -1,10 +1,10 @@
 <?php
 /**
  * Plugin Name:       WC Custom Emails
- * Plugin URI:        https://github.com/Plugin-Email-Woocommerce
+ * Plugin URI:        https://origenweb.co/plugins
  * Description:       Personaliza todas las plantillas HTML de correo de WooCommerce desde un panel de administración.
  * Version:           1.2.0
- * Author:            WC Custom Emails
+ * Author:            Origen Web
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Text Domain:       wc-custom-emails
