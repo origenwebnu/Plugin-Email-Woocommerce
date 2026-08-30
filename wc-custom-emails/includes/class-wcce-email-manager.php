@@ -107,36 +107,34 @@ class WCCE_Email_Manager {
 
 		$prepared = self::prepare_email_for_preview( $email );
 
-		if ( is_wp_error( $prepared ) ) {
-			return $prepared;
-		}
+		if ( true === $prepared ) {
+			remove_filter( 'woocommerce_email_get_content_html', array( self::instance(), 'replace_email_html' ), 999 );
 
-		remove_filter( 'woocommerce_email_get_content_html', array( self::instance(), 'replace_email_html' ), 999 );
+			ob_start();
 
-		ob_start();
-
-		$html = '';
-
-		try {
-			$html = $email->get_content_html();
-		} catch ( Throwable $exception ) {
 			$html = '';
-		}
 
-		$unexpected_output = ob_get_clean();
+			try {
+				$html = $email->get_content_html();
+			} catch ( Throwable $exception ) {
+				$html = '';
+			}
 
-		add_filter( 'woocommerce_email_get_content_html', array( self::instance(), 'replace_email_html' ), 999, 2 );
+			$unexpected_output = ob_get_clean();
 
-		if ( method_exists( $email, 'restore_locale' ) ) {
-			$email->restore_locale();
-		}
+			add_filter( 'woocommerce_email_get_content_html', array( self::instance(), 'replace_email_html' ), 999, 2 );
 
-		if ( ! empty( $html ) ) {
-			return $html;
-		}
+			if ( method_exists( $email, 'restore_locale' ) ) {
+				$email->restore_locale();
+			}
 
-		if ( ! empty( $unexpected_output ) ) {
-			return $unexpected_output;
+			if ( ! empty( $html ) ) {
+				return $html;
+			}
+
+			if ( ! empty( $unexpected_output ) ) {
+				return $unexpected_output;
+			}
 		}
 
 		return self::get_raw_template_content( $email );
@@ -146,7 +144,7 @@ class WCCE_Email_Manager {
 	 * Prepare locale, sample data and placeholders before rendering a template.
 	 *
 	 * @param WC_Email $email Email object.
-	 * @return true|WP_Error
+	 * @return bool
 	 */
 	private static function prepare_email_for_preview( $email ) {
 		if ( method_exists( $email, 'setup_locale' ) ) {
@@ -158,10 +156,11 @@ class WCCE_Email_Manager {
 		}
 
 		if ( empty( $email->object ) ) {
-			return new WP_Error(
-				'wcce_no_sample_data',
-				__( 'No hay pedidos ni usuarios para generar la plantilla. Crea al menos un pedido en WooCommerce e inténtalo de nuevo.', 'wc-custom-emails' )
-			);
+			if ( method_exists( $email, 'restore_locale' ) ) {
+				$email->restore_locale();
+			}
+
+			return false;
 		}
 
 		if ( is_a( $email->object, 'WC_Order' ) ) {
@@ -176,11 +175,11 @@ class WCCE_Email_Manager {
 		if ( is_a( $email->object, 'WP_User' ) ) {
 			$user = $email->object;
 
-			$email->recipient                          = $user->user_email;
+			$email->recipient                           = $user->user_email;
 			$email->placeholders['{customer_username}'] = $user->user_login;
-			$email->placeholders['{customer_email}']  = $user->user_email;
+			$email->placeholders['{customer_email}']    = $user->user_email;
 			$email->placeholders['{customer_name}']     = $user->display_name;
-			$email->placeholders['{account_login_url}'] = wc_get_page_permalink( 'myaccount' );
+			$email->placeholders['{account_login_url}']  = wc_get_page_permalink( 'myaccount' );
 			$email->placeholders['{reset_password_url}'] = wp_lostpassword_url();
 		}
 
@@ -201,34 +200,127 @@ class WCCE_Email_Manager {
 			return;
 		}
 
-		if ( self::email_uses_order_object( $email ) && function_exists( 'wc_get_orders' ) ) {
+		if ( self::email_uses_order_object( $email ) ) {
+			$order = self::get_sample_order();
+
+			if ( $order ) {
+				$email->object = $order;
+				return;
+			}
+		}
+
+		$user = self::get_sample_user();
+
+		if ( $user ) {
+			$email->object = $user;
+		}
+	}
+
+	/**
+	 * Find a real order or create a mock one for template rendering.
+	 *
+	 * @return WC_Order|null
+	 */
+	private static function get_sample_order() {
+		if ( function_exists( 'wc_get_orders' ) ) {
 			$orders = wc_get_orders(
 				array(
 					'limit'   => 1,
 					'orderby' => 'date',
 					'order'   => 'DESC',
-					'status'  => array_keys( wc_get_order_statuses() ),
+					'status'  => 'any',
 				)
 			);
 
 			if ( ! empty( $orders ) ) {
-				$email->object = $orders[0];
-				return;
+				return $orders[0];
 			}
 		}
 
-		if ( function_exists( 'get_users' ) ) {
-			$users = get_users(
-				array(
-					'number' => 1,
-					'role'   => 'customer',
-				)
-			);
+		$legacy_orders = get_posts(
+			array(
+				'post_type'      => 'shop_order',
+				'post_status'    => array_keys( wc_get_order_statuses() ),
+				'posts_per_page' => 1,
+				'orderby'        => 'date',
+				'order'          => 'DESC',
+				'fields'         => 'ids',
+			)
+		);
 
-			if ( ! empty( $users ) ) {
-				$email->object = $users[0];
-			}
+		if ( ! empty( $legacy_orders ) ) {
+			return wc_get_order( $legacy_orders[0] );
 		}
+
+		return self::create_mock_order();
+	}
+
+	/**
+	 * Find any available user for user-based email templates.
+	 *
+	 * @return WP_User|null
+	 */
+	private static function get_sample_user() {
+		if ( ! function_exists( 'get_users' ) ) {
+			return null;
+		}
+
+		$users = get_users(
+			array(
+				'number' => 1,
+				'role'   => 'customer',
+			)
+		);
+
+		if ( ! empty( $users ) ) {
+			return $users[0];
+		}
+
+		$users = get_users(
+			array(
+				'number' => 1,
+			)
+		);
+
+		if ( ! empty( $users ) ) {
+			return $users[0];
+		}
+
+		return null;
+	}
+
+	/**
+	 * Build an in-memory order when the store has no orders yet.
+	 *
+	 * @return WC_Order|null
+	 */
+	private static function create_mock_order() {
+		if ( ! class_exists( 'WC_Order' ) ) {
+			return null;
+		}
+
+		$order = new WC_Order();
+		$order->set_status( 'processing' );
+		$order->set_currency( get_woocommerce_currency() );
+		$order->set_date_created( time() );
+		$order->set_billing_first_name( 'Juan' );
+		$order->set_billing_last_name( 'Perez' );
+		$order->set_billing_company( 'Empresa Demo' );
+		$order->set_billing_address_1( 'Calle Ejemplo 123' );
+		$order->set_billing_city( 'Madrid' );
+		$order->set_billing_postcode( '28001' );
+		$order->set_billing_country( 'ES' );
+		$order->set_billing_email( 'cliente@ejemplo.com' );
+		$order->set_billing_phone( '600000000' );
+		$order->set_shipping_first_name( 'Juan' );
+		$order->set_shipping_last_name( 'Perez' );
+		$order->set_shipping_address_1( 'Calle Ejemplo 123' );
+		$order->set_shipping_city( 'Madrid' );
+		$order->set_shipping_postcode( '28001' );
+		$order->set_shipping_country( 'ES' );
+		$order->set_total( 49.99 );
+
+		return $order;
 	}
 
 	/**
@@ -263,16 +355,31 @@ class WCCE_Email_Manager {
 		$template_path = wc_locate_template( $email->template_html );
 
 		if ( ! $template_path || ! file_exists( $template_path ) ) {
+			$plugin_template = WC()->plugin_path() . '/templates/' . $email->template_html;
+
+			if ( file_exists( $plugin_template ) ) {
+				$template_path = $plugin_template;
+			}
+		}
+
+		if ( ! $template_path || ! file_exists( $template_path ) ) {
 			return new WP_Error(
 				'wcce_template_missing',
 				__( 'No se pudo localizar la plantilla estándar de WooCommerce.', 'wc-custom-emails' )
 			);
 		}
 
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-		$content = file_get_contents( $template_path );
+		$parts = array(
+			self::read_template_file( 'emails/email-styles.php' ),
+			self::read_template_file( 'emails/email-header.php' ),
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+			file_get_contents( $template_path ),
+			self::read_template_file( 'emails/email-footer.php' ),
+		);
 
-		if ( false === $content || '' === trim( $content ) ) {
+		$content = trim( implode( "\n\n", array_filter( $parts ) ) );
+
+		if ( '' === $content ) {
 			return new WP_Error(
 				'wcce_template_empty',
 				__( 'La plantilla estándar de WooCommerce está vacía.', 'wc-custom-emails' )
@@ -282,12 +389,39 @@ class WCCE_Email_Manager {
 		$notice = sprintf(
 			"<!-- %s -->\n",
 			esc_html__(
-				'Plantilla PHP original de WooCommerce. Contiene código PHP que debes adaptar a HTML antes de subirla.',
+				'Plantilla original de WooCommerce. Puede contener código PHP y variables. Úsala como referencia para crear tu HTML personalizado.',
 				'wc-custom-emails'
 			)
 		);
 
 		return $notice . $content;
+	}
+
+	/**
+	 * Read a WooCommerce email template file from disk.
+	 *
+	 * @param string $template Relative template path.
+	 * @return string
+	 */
+	private static function read_template_file( $template ) {
+		$template_path = wc_locate_template( $template );
+
+		if ( ! $template_path || ! file_exists( $template_path ) ) {
+			$plugin_template = WC()->plugin_path() . '/templates/' . $template;
+
+			if ( file_exists( $plugin_template ) ) {
+				$template_path = $plugin_template;
+			}
+		}
+
+		if ( ! $template_path || ! file_exists( $template_path ) ) {
+			return '';
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$content = file_get_contents( $template_path );
+
+		return false === $content ? '' : $content;
 	}
 
 	/**
