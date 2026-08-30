@@ -36,28 +36,79 @@ class WCCE_Email_Manager {
 	 * Constructor.
 	 */
 	private function __construct() {
-		add_filter( 'woocommerce_email_get_content_html', array( $this, 'replace_email_html' ), 999, 2 );
+		add_filter( 'woocommerce_mail_callback_params', array( $this, 'replace_outgoing_email' ), 999, 2 );
+		add_filter( 'woocommerce_locate_template', array( $this, 'locate_custom_template' ), 999, 3 );
 	}
 
 	/**
-	 * Replace default email HTML with custom uploaded template.
+	 * Replace the final email body before WordPress sends it.
 	 *
-	 * @param string   $content Default HTML content.
-	 * @param WC_Email $email   Email object.
-	 * @return string
+	 * This hook works for classic PHP templates and for the block email editor.
+	 *
+	 * @param array    $params Mail callback params.
+	 * @param WC_Email $email  Email object.
+	 * @return array
 	 */
-	public function replace_email_html( $content, $email ) {
-		if ( ! is_a( $email, 'WC_Email' ) || empty( $email->id ) ) {
-			return $content;
+	public function replace_outgoing_email( $params, $email ) {
+		if ( ! is_a( $email, 'WC_Email' ) || empty( $email->id ) || ! is_array( $params ) ) {
+			return $params;
 		}
 
 		$custom_html = WCCE_Storage::get_template_content( $email->id );
 
 		if ( false === $custom_html ) {
-			return $content;
+			return $params;
 		}
 
-		return $this->process_placeholders( $custom_html, $email );
+		$processed = self::process_placeholders( $custom_html, $email );
+
+		if ( method_exists( $email, 'style_inline' ) ) {
+			$params[2] = $email->style_inline( $processed );
+		} else {
+			$params[2] = $processed;
+		}
+
+		return $params;
+	}
+
+	/**
+	 * Point WooCommerce to a PHP wrapper that outputs the custom HTML.
+	 *
+	 * @param string $template      Template path.
+	 * @param string $template_name Template name.
+	 * @param string $template_path Template path.
+	 * @return string
+	 */
+	public function locate_custom_template( $template, $template_name, $template_path ) {
+		if ( 0 !== strpos( $template_name, 'emails/' ) || '.php' !== substr( $template_name, -4 ) ) {
+			return $template;
+		}
+
+		$email_id = self::get_email_id_for_template( $template_name );
+
+		if ( ! $email_id || ! WCCE_Storage::has_custom_template( $email_id ) ) {
+			return $template;
+		}
+
+		$wrapper = WCCE_Storage::get_wrapper_file_path( $email_id );
+
+		return file_exists( $wrapper ) ? $wrapper : $template;
+	}
+
+	/**
+	 * Find the WooCommerce email ID for a template file.
+	 *
+	 * @param string $template_name Template file name.
+	 * @return string|null
+	 */
+	public static function get_email_id_for_template( $template_name ) {
+		foreach ( self::get_all_emails() as $email ) {
+			if ( ! empty( $email->template_html ) && $email->template_html === $template_name ) {
+				return $email->id;
+			}
+		}
+
+		return null;
 	}
 
 	/**
@@ -67,9 +118,17 @@ class WCCE_Email_Manager {
 	 * @param WC_Email $email Email object.
 	 * @return string
 	 */
-	private function process_placeholders( $html, $email ) {
+	public static function process_placeholders( $html, $email ) {
+		if ( ! is_a( $email, 'WC_Email' ) ) {
+			return $html;
+		}
+
 		if ( method_exists( $email, 'setup_locale' ) ) {
 			$email->setup_locale();
+		}
+
+		if ( method_exists( $email, 'set_placeholders' ) ) {
+			$email->set_placeholders();
 		}
 
 		$processed = $email->format_string( $html );
@@ -105,46 +164,49 @@ class WCCE_Email_Manager {
 			return new WP_Error( 'wcce_invalid_email', __( 'Email no válido.', 'wc-custom-emails' ) );
 		}
 
-		$prepared = self::prepare_email_for_preview( $email );
+		self::prepare_email_for_preview( $email );
 
-		if ( true === $prepared ) {
-			remove_filter( 'woocommerce_email_get_content_html', array( self::instance(), 'replace_email_html' ), 999 );
-
+		if ( ! empty( $email->template_html ) && function_exists( 'wc_get_template_html' ) ) {
 			ob_start();
 
 			$html = '';
 
 			try {
-				$html = $email->get_content_html();
+				$html = wc_get_template_html(
+					$email->template_html,
+					array(
+						'order'              => is_a( $email->object, 'WC_Order' ) ? $email->object : null,
+						'email_heading'      => $email->get_heading(),
+						'additional_content' => $email->get_additional_content(),
+						'sent_to_admin'      => ! $email->is_customer_email(),
+						'plain_text'         => false,
+						'email'              => $email,
+					)
+				);
 			} catch ( Throwable $exception ) {
 				$html = '';
 			}
 
-			$unexpected_output = ob_get_clean();
-
-			add_filter( 'woocommerce_email_get_content_html', array( self::instance(), 'replace_email_html' ), 999, 2 );
-
-			if ( method_exists( $email, 'restore_locale' ) ) {
-				$email->restore_locale();
-			}
+			ob_end_clean();
 
 			if ( ! empty( $html ) ) {
 				return $html;
 			}
-
-			if ( ! empty( $unexpected_output ) ) {
-				return $unexpected_output;
-			}
 		}
 
-		return self::get_raw_template_content( $email );
+		$raw_template = self::get_raw_template_content( $email );
+
+		if ( ! is_wp_error( $raw_template ) && '' !== trim( $raw_template ) ) {
+			return $raw_template;
+		}
+
+		return self::get_starter_template( $email );
 	}
 
 	/**
 	 * Prepare locale, sample data and placeholders before rendering a template.
 	 *
 	 * @param WC_Email $email Email object.
-	 * @return bool
 	 */
 	private static function prepare_email_for_preview( $email ) {
 		if ( method_exists( $email, 'setup_locale' ) ) {
@@ -155,18 +217,10 @@ class WCCE_Email_Manager {
 			self::maybe_set_sample_object( $email );
 		}
 
-		if ( empty( $email->object ) ) {
-			if ( method_exists( $email, 'restore_locale' ) ) {
-				$email->restore_locale();
-			}
-
-			return false;
-		}
-
 		if ( is_a( $email->object, 'WC_Order' ) ) {
 			$order = $email->object;
 
-			$email->recipient = $order->get_billing_email();
+			$email->recipient                               = $order->get_billing_email();
 			$email->placeholders['{order_date}']              = wc_format_datetime( $order->get_date_created() );
 			$email->placeholders['{order_number}']            = $order->get_order_number();
 			$email->placeholders['{order_billing_full_name}'] = $order->get_formatted_billing_full_name();
@@ -175,10 +229,10 @@ class WCCE_Email_Manager {
 		if ( is_a( $email->object, 'WP_User' ) ) {
 			$user = $email->object;
 
-			$email->recipient                           = $user->user_email;
-			$email->placeholders['{customer_username}'] = $user->user_login;
-			$email->placeholders['{customer_email}']    = $user->user_email;
-			$email->placeholders['{customer_name}']     = $user->display_name;
+			$email->recipient                            = $user->user_email;
+			$email->placeholders['{customer_username}']  = $user->user_login;
+			$email->placeholders['{customer_email}']     = $user->user_email;
+			$email->placeholders['{customer_name}']      = $user->display_name;
 			$email->placeholders['{account_login_url}']  = wc_get_page_permalink( 'myaccount' );
 			$email->placeholders['{reset_password_url}'] = wp_lostpassword_url();
 		}
@@ -186,8 +240,6 @@ class WCCE_Email_Manager {
 		if ( method_exists( $email, 'set_placeholders' ) ) {
 			$email->set_placeholders();
 		}
-
-		return true;
 	}
 
 	/**
@@ -352,17 +404,9 @@ class WCCE_Email_Manager {
 			);
 		}
 
-		$template_path = wc_locate_template( $email->template_html );
+		$template_path = self::resolve_template_path( $email->template_html );
 
-		if ( ! $template_path || ! file_exists( $template_path ) ) {
-			$plugin_template = WC()->plugin_path() . '/templates/' . $email->template_html;
-
-			if ( file_exists( $plugin_template ) ) {
-				$template_path = $plugin_template;
-			}
-		}
-
-		if ( ! $template_path || ! file_exists( $template_path ) ) {
+		if ( ! $template_path ) {
 			return new WP_Error(
 				'wcce_template_missing',
 				__( 'No se pudo localizar la plantilla estándar de WooCommerce.', 'wc-custom-emails' )
@@ -389,12 +433,70 @@ class WCCE_Email_Manager {
 		$notice = sprintf(
 			"<!-- %s -->\n",
 			esc_html__(
-				'Plantilla original de WooCommerce. Puede contener código PHP y variables. Úsala como referencia para crear tu HTML personalizado.',
+				'Plantilla original de WooCommerce. Puede contener código PHP. Úsala como referencia para crear tu HTML personalizado.',
 				'wc-custom-emails'
 			)
 		);
 
 		return $notice . $content;
+	}
+
+	/**
+	 * Generate a simple editable HTML starter template.
+	 *
+	 * @param WC_Email $email Email object.
+	 * @return string
+	 */
+	public static function get_starter_template( $email ) {
+		$heading      = method_exists( $email, 'get_heading' ) ? $email->get_heading() : $email->get_title();
+		$placeholders = self::get_placeholders( $email );
+
+		ob_start();
+		?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title><?php echo esc_html( $heading ); ?></title>
+</head>
+<body style="margin:0;padding:20px;background:#f7f7f7;font-family:Arial,sans-serif;color:#333;">
+	<div style="max-width:600px;margin:0 auto;background:#ffffff;padding:30px;border:1px solid #e5e5e5;">
+		<h1 style="margin-top:0;"><?php echo esc_html( $heading ); ?></h1>
+		<p>Hola {order_billing_full_name},</p>
+		<p>Este es un ejemplo de plantilla para el email <strong><?php echo esc_html( $email->id ); ?></strong>.</p>
+		<p><strong>Pedido:</strong> {order_number}</p>
+		<p><strong>Fecha:</strong> {order_date}</p>
+		<p><strong>Tienda:</strong> {site_title}</p>
+		<hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+		<p style="font-size:12px;color:#777;">Variables disponibles: <?php echo esc_html( implode( ', ', $placeholders ) ); ?></p>
+	</div>
+</body>
+</html>
+		<?php
+		return trim( (string) ob_get_clean() );
+	}
+
+	/**
+	 * Resolve a WooCommerce template path.
+	 *
+	 * @param string $template Relative template path.
+	 * @return string
+	 */
+	private static function resolve_template_path( $template ) {
+		$template_path = '';
+
+		if ( function_exists( 'wc_locate_template' ) ) {
+			$template_path = wc_locate_template( $template );
+		}
+
+		if ( $template_path && file_exists( $template_path ) ) {
+			return $template_path;
+		}
+
+		$plugin_template = WC()->plugin_path() . '/templates/' . $template;
+
+		return file_exists( $plugin_template ) ? $plugin_template : '';
 	}
 
 	/**
@@ -404,17 +506,9 @@ class WCCE_Email_Manager {
 	 * @return string
 	 */
 	private static function read_template_file( $template ) {
-		$template_path = wc_locate_template( $template );
+		$template_path = self::resolve_template_path( $template );
 
-		if ( ! $template_path || ! file_exists( $template_path ) ) {
-			$plugin_template = WC()->plugin_path() . '/templates/' . $template;
-
-			if ( file_exists( $plugin_template ) ) {
-				$template_path = $plugin_template;
-			}
-		}
-
-		if ( ! $template_path || ! file_exists( $template_path ) ) {
+		if ( ! $template_path ) {
 			return '';
 		}
 
@@ -431,7 +525,13 @@ class WCCE_Email_Manager {
 	 * @return string[]
 	 */
 	public static function get_placeholders( $email ) {
-		if ( ! is_a( $email, 'WC_Email' ) || empty( $email->placeholders ) ) {
+		if ( ! is_a( $email, 'WC_Email' ) ) {
+			return array();
+		}
+
+		self::prepare_email_for_preview( $email );
+
+		if ( empty( $email->placeholders ) ) {
 			return array();
 		}
 

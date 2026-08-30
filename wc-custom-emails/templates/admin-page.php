@@ -45,6 +45,7 @@ defined( 'ABSPATH' ) || exit;
 				<?php foreach ( $emails as $email ) : ?>
 					<?php
 					$has_custom     = WCCE_Storage::has_custom_template( $email->id );
+					$template_meta  = WCCE_Storage::get_template_meta( $email->id );
 					$placeholders   = WCCE_Email_Manager::get_placeholders( $email );
 					$upload_action  = admin_url( 'admin-post.php' );
 					$delete_url     = wp_nonce_url(
@@ -79,6 +80,9 @@ defined( 'ABSPATH' ) || exit;
 						<td>
 							<?php if ( $has_custom ) : ?>
 								<span class="wcce-badge wcce-badge--custom"><?php esc_html_e( 'Personalizado', 'wc-custom-emails' ); ?></span>
+								<?php if ( ! empty( $template_meta['size'] ) ) : ?>
+									<br><span class="description"><?php echo esc_html( size_format( $template_meta['size'] ) ); ?></span>
+								<?php endif; ?>
 							<?php else : ?>
 								<span class="wcce-badge wcce-badge--default"><?php esc_html_e( 'Estándar WC', 'wc-custom-emails' ); ?></span>
 							<?php endif; ?>
@@ -129,7 +133,17 @@ defined( 'ABSPATH' ) || exit;
 				<li><?php esc_html_e( 'Descarga la plantilla estándar del email que quieres personalizar.', 'wc-custom-emails' ); ?></li>
 				<li><?php esc_html_e( 'Edita el HTML y conserva los placeholders (ej: {order_number}, {site_title}).', 'wc-custom-emails' ); ?></li>
 				<li><?php esc_html_e( 'Sube el archivo .html modificado. El plugin lo usará automáticamente al enviar ese correo.', 'wc-custom-emails' ); ?></li>
+				<li><?php esc_html_e( 'Usa el ID exacto del email al subir la plantilla (ej: new_order, customer_completed_order).', 'wc-custom-emails' ); ?></li>
 			</ol>
+			<p class="description">
+				<?php
+				printf(
+					/* translators: %s: storage directory path */
+					esc_html__( 'Las plantillas se guardan en: %s', 'wc-custom-emails' ),
+					esc_html( WCCE_Storage::get_directory() )
+				);
+				?>
+			</p>
 		</div>
 	<?php endif; ?>
 </div>
