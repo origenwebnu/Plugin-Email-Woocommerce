@@ -131,7 +131,7 @@ defined( 'ABSPATH' ) || exit;
 			<h2><?php esc_html_e( 'Cómo usar las plantillas', 'wc-custom-emails' ); ?></h2>
 			<ol>
 				<li><?php esc_html_e( 'Descarga la plantilla estándar del email que quieres personalizar.', 'wc-custom-emails' ); ?></li>
-				<li><?php esc_html_e( 'Edita el HTML y conserva los placeholders (ej: {order_number}, {site_title}).', 'wc-custom-emails' ); ?></li>
+				<li><?php esc_html_e( 'Edita el HTML y conserva los placeholders (ej: {order_number}, {site_title}, {order_details}).', 'wc-custom-emails' ); ?></li>
 				<li><?php esc_html_e( 'Sube el archivo .html modificado. El plugin lo usará automáticamente al enviar ese correo.', 'wc-custom-emails' ); ?></li>
 				<li><?php esc_html_e( 'Usa el ID exacto del email al subir la plantilla (ej: new_order, customer_completed_order).', 'wc-custom-emails' ); ?></li>
 			</ol>
