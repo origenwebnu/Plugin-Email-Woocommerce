@@ -1,0 +1,62 @@
+.wcce-admin-wrap .wcce-emails-table {
+	margin-top: 20px;
+}
+
+.wcce-admin-wrap .wcce-badge {
+	display: inline-block;
+	padding: 3px 8px;
+	border-radius: 3px;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.wcce-admin-wrap .wcce-badge--custom {
+	background: #d4edda;
+	color: #155724;
+}
+
+.wcce-admin-wrap .wcce-badge--default {
+	background: #e2e3e5;
+	color: #383d41;
+}
+
+.wcce-admin-wrap .wcce-actions {
+	min-width: 280px;
+}
+
+.wcce-admin-wrap .wcce-upload-form {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 8px;
+}
+
+.wcce-admin-wrap .wcce-upload-form input[type="file"] {
+	max-width: 200px;
+}
+
+.wcce-admin-wrap .wcce-placeholders summary {
+	cursor: pointer;
+	color: #2271b1;
+}
+
+.wcce-admin-wrap .wcce-placeholders ul {
+	margin: 8px 0 0;
+	padding-left: 18px;
+	max-height: 120px;
+	overflow-y: auto;
+}
+
+.wcce-admin-wrap .wcce-help-box {
+	margin-top: 30px;
+	padding: 16px 20px;
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-left: 4px solid #2271b1;
+}
+
+.wcce-admin-wrap .wcce-help-box h2 {
+	margin-top: 0;
+	font-size: 16px;
+}
