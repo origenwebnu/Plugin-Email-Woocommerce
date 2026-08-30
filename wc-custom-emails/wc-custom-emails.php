@@ -3,7 +3,7 @@
  * Plugin Name:       WC Custom Emails
  * Plugin URI:        https://github.com/Plugin-Email-Woocommerce
  * Description:       Personaliza todas las plantillas HTML de correo de WooCommerce desde un panel de administración.
- * Version:           1.1.0
+ * Version:           1.2.0
  * Author:            WC Custom Emails
  * Requires at least: 5.8
  * Requires PHP:      7.4
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'WCCE_VERSION', '1.1.0' );
+define( 'WCCE_VERSION', '1.2.0' );
 define( 'WCCE_PLUGIN_FILE', __FILE__ );
 define( 'WCCE_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WCCE_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

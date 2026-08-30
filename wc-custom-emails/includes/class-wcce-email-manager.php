@@ -131,13 +131,199 @@ class WCCE_Email_Manager {
 			$email->set_placeholders();
 		}
 
+		$email->placeholders['{store_email}'] = get_option( 'woocommerce_email_from_address', '' );
+
 		$processed = $email->format_string( $html );
+		$processed = self::replace_dynamic_blocks( $processed, $email );
 
 		if ( method_exists( $email, 'restore_locale' ) ) {
 			$email->restore_locale();
 		}
 
 		return $processed;
+	}
+
+	/**
+	 * Replace dynamic HTML blocks that WooCommerce generates at runtime.
+	 *
+	 * @param string   $html  Template HTML.
+	 * @param WC_Email $email Email object.
+	 * @return string
+	 */
+	private static function replace_dynamic_blocks( $html, $email ) {
+		$blocks = array(
+			'{order_details}'       => self::render_order_details_block( $email ),
+			'{order_items}'         => self::render_order_items_block( $email ),
+			'{order_meta}'          => self::render_order_meta_block( $email ),
+			'{order_addresses}'     => self::render_order_addresses_block( $email ),
+			'{additional_content}'  => self::render_additional_content_block( $email ),
+		);
+
+		foreach ( $blocks as $placeholder => $content ) {
+			if ( false !== strpos( $html, $placeholder ) ) {
+				$html = str_replace( $placeholder, $content, $html );
+			}
+		}
+
+		return $html;
+	}
+
+	/**
+	 * Get the order linked to the current email.
+	 *
+	 * @param WC_Email $email Email object.
+	 * @return WC_Order|null
+	 */
+	private static function get_email_order( $email ) {
+		if ( is_a( $email->object, 'WC_Order' ) ) {
+			return $email->object;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Render products table, totals, meta and addresses.
+	 *
+	 * @param WC_Email $email Email object.
+	 * @return string
+	 */
+	private static function render_order_details_block( $email ) {
+		$order = self::get_email_order( $email );
+
+		if ( ! $order ) {
+			return '';
+		}
+
+		return self::capture_email_action_output(
+			static function () use ( $order, $email ) {
+				$sent_to_admin = ! $email->is_customer_email();
+				$plain_text    = false;
+
+				do_action( 'woocommerce_email_order_details', $order, $sent_to_admin, $plain_text, $email );
+				do_action( 'woocommerce_email_order_meta', $order, $sent_to_admin, $plain_text, $email );
+				do_action( 'woocommerce_email_customer_details', $order, $sent_to_admin, $plain_text, $email );
+			}
+		);
+	}
+
+	/**
+	 * Render only the products table and totals.
+	 *
+	 * @param WC_Email $email Email object.
+	 * @return string
+	 */
+	private static function render_order_items_block( $email ) {
+		$order = self::get_email_order( $email );
+
+		if ( ! $order ) {
+			return '';
+		}
+
+		return self::capture_email_action_output(
+			static function () use ( $order, $email ) {
+				do_action( 'woocommerce_email_order_details', $order, ! $email->is_customer_email(), false, $email );
+			}
+		);
+	}
+
+	/**
+	 * Render custom order meta section.
+	 *
+	 * @param WC_Email $email Email object.
+	 * @return string
+	 */
+	private static function render_order_meta_block( $email ) {
+		$order = self::get_email_order( $email );
+
+		if ( ! $order ) {
+			return '';
+		}
+
+		return self::capture_email_action_output(
+			static function () use ( $order, $email ) {
+				do_action( 'woocommerce_email_order_meta', $order, ! $email->is_customer_email(), false, $email );
+			}
+		);
+	}
+
+	/**
+	 * Render billing and shipping addresses.
+	 *
+	 * @param WC_Email $email Email object.
+	 * @return string
+	 */
+	private static function render_order_addresses_block( $email ) {
+		$order = self::get_email_order( $email );
+
+		if ( ! $order ) {
+			return '';
+		}
+
+		return self::capture_email_action_output(
+			static function () use ( $order, $email ) {
+				do_action( 'woocommerce_email_customer_details', $order, ! $email->is_customer_email(), false, $email );
+			}
+		);
+	}
+
+	/**
+	 * Render the additional content configured in WooCommerce email settings.
+	 *
+	 * @param WC_Email $email Email object.
+	 * @return string
+	 */
+	private static function render_additional_content_block( $email ) {
+		if ( ! method_exists( $email, 'get_additional_content' ) ) {
+			return '';
+		}
+
+		$content = trim( (string) $email->get_additional_content() );
+
+		if ( '' === $content ) {
+			return '';
+		}
+
+		return wpautop( wptexturize( $email->format_string( $content ) ) );
+	}
+
+	/**
+	 * Capture output from WooCommerce email action hooks.
+	 *
+	 * @param callable $callback Callback that triggers WooCommerce email hooks.
+	 * @return string
+	 */
+	private static function capture_email_action_output( $callback ) {
+		if ( function_exists( 'WC' ) && WC()->mailer() ) {
+			WC()->mailer();
+		}
+
+		ob_start();
+
+		try {
+			call_user_func( $callback );
+		} catch ( Throwable $exception ) {
+			ob_end_clean();
+			return '';
+		}
+
+		return (string) ob_get_clean();
+	}
+
+	/**
+	 * Get custom dynamic placeholders supported by this plugin.
+	 *
+	 * @return string[]
+	 */
+	public static function get_dynamic_placeholders() {
+		return array(
+			'{order_details}',
+			'{order_items}',
+			'{order_meta}',
+			'{order_addresses}',
+			'{additional_content}',
+			'{store_email}',
+		);
 	}
 
 	/**
@@ -468,6 +654,7 @@ class WCCE_Email_Manager {
 		<p><strong>Pedido:</strong> {order_number}</p>
 		<p><strong>Fecha:</strong> {order_date}</p>
 		<p><strong>Tienda:</strong> {site_title}</p>
+		<div id="order-details-block">{order_details}</div>
 		<hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
 		<p style="font-size:12px;color:#777;">Variables disponibles: <?php echo esc_html( implode( ', ', $placeholders ) ); ?></p>
 	</div>
@@ -531,10 +718,12 @@ class WCCE_Email_Manager {
 
 		self::prepare_email_for_preview( $email );
 
-		if ( empty( $email->placeholders ) ) {
-			return array();
+		$placeholders = array();
+
+		if ( ! empty( $email->placeholders ) ) {
+			$placeholders = array_keys( $email->placeholders );
 		}
 
-		return array_keys( $email->placeholders );
+		return array_values( array_unique( array_merge( $placeholders, self::get_dynamic_placeholders() ) ) );
 	}
 }
