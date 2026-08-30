@@ -199,11 +199,27 @@ class WCCE_Admin {
 		}
 
 		if ( ! $email ) {
-			wp_die( esc_html__( 'Email no encontrado.', 'wc-custom-emails' ) );
+			$this->redirect_with_notice( 'error', __( 'Email no encontrado.', 'wc-custom-emails' ) );
 		}
 
 		$html = WCCE_Email_Manager::get_default_html( $email );
 
+		if ( is_wp_error( $html ) ) {
+			$this->redirect_with_notice( 'error', $html->get_error_message() );
+		}
+
+		if ( '' === trim( $html ) ) {
+			$this->redirect_with_notice(
+				'error',
+				__( 'No se pudo generar la plantilla estándar. Comprueba que exista al menos un pedido en la tienda.', 'wc-custom-emails' )
+			);
+		}
+
+		while ( ob_get_level() > 0 ) {
+			ob_end_clean();
+		}
+
+		nocache_headers();
 		header( 'Content-Type: text/html; charset=utf-8' );
 		header( 'Content-Disposition: attachment; filename="' . sanitize_file_name( $email_id ) . '-default.html"' );
 		header( 'Content-Length: ' . strlen( $html ) );
