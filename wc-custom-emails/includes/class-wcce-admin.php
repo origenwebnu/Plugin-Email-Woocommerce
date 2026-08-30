@@ -211,7 +211,7 @@ class WCCE_Admin {
 		if ( '' === trim( $html ) ) {
 			$this->redirect_with_notice(
 				'error',
-				__( 'No se pudo generar la plantilla estándar. Comprueba que exista al menos un pedido en la tienda.', 'wc-custom-emails' )
+				__( 'No se pudo generar la plantilla estándar de WooCommerce.', 'wc-custom-emails' )
 			);
 		}
 
